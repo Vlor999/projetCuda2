@@ -1,0 +1,73 @@
+stages:
+  - build
+  - test
+  - report
+
+build-assignment:
+  stage: build
+  script:
+    - cp /data/GPUProg/BLENDING/src/main.cpp src/main.cpp 
+    - cp /data/GPUProg/BLENDING/src/prefixsum.cpp src/prefixsum.cpp
+    - cp /data/GPUProg/BLENDING/src/dataset.cpp src/dataset.cpp
+    - cp /data/GPUProg/BLENDING/include/dataset.h include/dataset.h
+    - cp /data/GPUProg/BLENDING/include/prefixsum.h include/prefixsum.h
+    - cp /data/GPUProg/BLENDING/include/CPUTimer.h include/CPUTimer.h
+    - cp /data/GPUProg/BLENDING/include/GPUTimer.cuh include/GPUTimer.cuh
+    - cp /data/GPUProg/BLENDING/include/Utility.cuh include/Utility.cuh
+    - cp /data/GPUProg/BLENDING/include/helper/bmp.h include/helper/bmp.h
+    - cp /data/GPUProg/BLENDING/include/helper/bmpwriter.h include/helper/bmpwriter.h
+    - cp /data/GPUProg/BLENDING/include/helper/cuda_helper_host.h include/helper/cuda_helper_host.h
+    - cp /data/GPUProg/BLENDING/include/helper/helper_math.h include/helper/helper_math.h
+    - mkdir build
+    - cd build
+    - cmake .. -DCC=75
+    - make clean
+    - make
+  tags:
+    - GPUProg
+  only:
+    - submission
+  artifacts:
+    paths:
+      - build/prefixsum
+    expire_in: 2 h
+
+test-assignment:
+  stage: test
+  script:
+    - cp /data/GPUProg/copyResults_blending.py copyResults.py
+    - cp /data/GPUProg/timedprocess.py timedprocess.py
+    - cp /data/GPUProg/execute_blending.py execute.py
+    - cp /data/GPUProg/aggregateResultsAndPlot_blending.py aggregateResultsAndPlot.py
+    - python execute.py
+    - python copyResults.py /data/GPUProg/results results.csv
+    - python aggregateResultsAndPlot.py -folder /data/GPUProg/results -plotname plot.pdf
+  tags:
+    - GPUProg
+  only:
+    - submission
+  artifacts:
+    paths:
+      - results.csv
+      - plot.pdf
+      - perf_table.csv
+      - summary_plot.pdf
+      - output
+    expire_in: 2 h
+
+collect-all:
+  stage: report
+  script:
+    - echo
+  tags:
+    - GPUProg
+  only:
+    - submission
+  artifacts:
+    paths:
+      - results.csv
+      - plot.pdf
+      - perf_table.csv
+      - summary_plot.pdf
+      - output
+    expire_in: 30 d
