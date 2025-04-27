@@ -22,21 +22,22 @@ void PrefixSumBlending_GPU::finalize()
 }
 
 __global__ void prefixAndColor(uint32_t n_pixels, uint32_t n_samples_per_pixel, const float *alpha, const float3 *colors, float3 *img_out) {
-    uint32_t pixel = blockIdx.x * blockDim.x + threadIdx.x;
-    if (pixel >= n_pixels) return;
+    uint32_t pos = blockIdx.x * blockDim.x + threadIdx.x;
 
     float3 sum = make_float3(0.0f, 0.0f, 0.0f);
-    uint32_t base = pixel * n_samples_per_pixel;
+    uint32_t base = pos * n_samples_per_pixel;
 
     float acc = 1.0f;
     for (uint32_t i = 0; i < n_samples_per_pixel; ++i) {
-        float a = alpha[base + i];
-        float3 c = colors[base + i];
-        sum += c * a * acc;
-        acc *= (1.0f - a);
+        uint32_t writtingPos = base + i;
+        float ai = alpha[writtingPos];
+
+        float3 ci = colors[writtingPos];
+        sum += ci * ai * acc;
+        acc *= (1.0f - ai);
     }
 
-    img_out[pixel] = sum;
+    img_out[pos] = sum;
 }
 
 void PrefixSumBlending_GPU::run(DatasetGPU &data, float3 *d_img_out)
