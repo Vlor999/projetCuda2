@@ -48,24 +48,36 @@ __global__ void prefixSumWeightsIteration(const float* alpha_in, float* weights_
     }
 
     extern __shared__ float sharedMemo[];
-    float *alpha = sharedMemo;
-    float *T = &sharedMemo[n_samples_per_pixel];
+    float* T = sharedMemo;
 
     for (uint32_t i = thread; i < n_samples_per_pixel; i += numberthreads){
-        alpha[i] = alpha_in[pixel * n_samples_per_pixel + i];
+        T[i] = 1.0f - alpha_in[pixel * n_samples_per_pixel + i];
     }
 
     __syncthreads();
+
+    for (uint32_t s = 1; s < n_samples_per_pixel; s *= 2) {
+        uint32_t i = (thread + 1) * s * 2 - 1;
+        if (i < n_samples_per_pixel) {
+            T[i] *= T[i - s];
+        }
+        __syncthreads();
+    }
 
     if (thread == 0) {
-        float ti = 1.0f;
-        for (uint32_t i = 0; i < n_samples_per_pixel; ++i) {
-            T[i] = ti;
-            ti *= (1.0f - alpha[i]);
-        }
+        T[n_samples_per_pixel - 1] = 1.0f;
     }
-
     __syncthreads();
+
+    for (uint32_t s = n_samples_per_pixel / 2; s >= 1; s /= 2) {
+        uint32_t i = (thread + 1) * s * 2 - 1;
+        if (i < n_samples_per_pixel) {
+            float temp = T[i - s];
+            T[i - s] = T[i];
+            T[i] *= temp;
+        }
+        __syncthreads();
+    }
 
     for (uint32_t i = thread; i < n_samples_per_pixel; i += numberthreads) {
         weights_out[pixel * n_samples_per_pixel + i] = T[i];
@@ -111,7 +123,7 @@ void PrefixSumBlending_GPU::prefixSumWeights(uint32_t numberPixels, uint32_t n_s
     // Equation : 2
     const uint32_t threads = BLOCK;
     const uint32_t blocks = numberPixels;
-    size_t shared_mem_size = sizeof(float) * n_samples_per_pixel * 2;
+    size_t shared_mem_size = sizeof(float) * n_samples_per_pixel;
 
     prefixSumWeightsIteration<<<blocks, threads, shared_mem_size>>>(d_alpha_in, d_weights_out, numberPixels, n_samples_per_pixel);
     CUDA_SYNC_CHECK_THROW();

@@ -13,50 +13,97 @@ PrefixSumBlending_GPU::~PrefixSumBlending_GPU()
 {
 }
 
-void PrefixSumBlending_GPU::setup(uint2 dimensions, uint32_t samples_per_pixel) {
+void PrefixSumBlending_GPU::setup(uint2 dimensions, uint32_t samples_per_pixel)
+{
+    uint32_t numberPixels = dimensions.x * dimensions.y;
+
+    // example: allocate additional buffer (malloc not relevant for timing)
+    CUDA_CHECK_THROW(cudaMalloc(&_d_weights, sizeof(float) * numberPixels * samples_per_pixel));
     CUDA_SYNC_CHECK_THROW();
 }
 
-void PrefixSumBlending_GPU::finalize() 
+void PrefixSumBlending_GPU::finalize()
 {
+    if (_d_weights){
+        cudaFree(_d_weights);
+    }
 }
 
-__global__ void prefixAndColorMultiThread(uint32_t n_pixels, uint32_t n_samples_per_pixel, const float *alpha, const float3 *colors, float3 *img_out) {
-    uint32_t warpId = (blockIdx.x * blockDim.x + threadIdx.x) / WARP_SIZE;
-    uint32_t laneId = threadIdx.x % WARP_SIZE;
+__global__ void prefixAndColorMultiThread(const float* alpha_in, const float3* colors_in, float3* img_out, uint32_t numberPixels, uint32_t n_samples_per_pixel) {
+    const uint32_t pixel = blockIdx.x;
+    const uint32_t thread = threadIdx.x;
+    const uint32_t numberthreads = blockDim.x;
 
-    if (warpId >= n_pixels) return;
+    if (pixel >= numberPixels) {
+        return;
+    }
 
-    uint32_t base = warpId * n_samples_per_pixel;
+    extern __shared__ float sharedMem[];
+    float* T = sharedMem;
+    float3* colorSums = (float3*)(sharedMem + n_samples_per_pixel);
+
+    for (uint32_t i = thread; i < n_samples_per_pixel; i += numberthreads) {
+        T[i] = 1.0f - alpha_in[pixel * n_samples_per_pixel + i];
+    }
+
+    __syncthreads();
+
+    for (uint32_t s = 1; s < n_samples_per_pixel; s *= 2) {
+        uint32_t i = (thread + 1) * s * 2 - 1;
+        if (i < n_samples_per_pixel) {
+            T[i] *= T[i - s];
+        }
+        __syncthreads();
+    }
+
+    if (thread == 0) {
+        T[n_samples_per_pixel - 1] = 1.0f;
+    }
+    __syncthreads();
+
+    for (uint32_t s = n_samples_per_pixel / 2; s >= 1; s /= 2) {
+        uint32_t i = (thread + 1) * s * 2 - 1;
+        if (i < n_samples_per_pixel) {
+            float temp = T[i - s];
+            T[i - s] = T[i];
+            T[i] *= temp;
+        }
+        __syncthreads();
+    }
+
     float3 sum = make_float3(0.0f, 0.0f, 0.0f);
-    float ti = 1.0f;
-    uint32_t writtingPos = base;
-    for (uint32_t i = laneId; i < n_samples_per_pixel; i += WARP_SIZE) {
-        float ai = alpha[writtingPos];
-        float3 ci = colors[writtingPos];
-        
+    for (uint32_t i = thread; i < n_samples_per_pixel; i += numberthreads) {
+        uint32_t idx = pixel * n_samples_per_pixel + i;
+        float ai = alpha_in[idx];
+        float ti = T[i];
+        float3 ci = colors_in[idx];
         sum += ci * ai * ti;
-        ti *= (1.0f - ai);
-        writtingPos++;
     }
 
-    for (int offset = 16; offset > 0; offset /= 2) {
-        sum.x += __shfl_down_sync(0xffffffff, sum.x, offset);
-        sum.y += __shfl_down_sync(0xffffffff, sum.y, offset);
-        sum.z += __shfl_down_sync(0xffffffff, sum.z, offset);
+    if (thread < numberthreads) {
+        colorSums[thread] = sum;
+    }
+    __syncthreads();
+
+    for (uint32_t s = numberthreads / 2; s > 0; s >>= 1) {
+        if (thread < s) {
+            colorSums[thread] += colorSums[thread + s];
+        }
+        __syncthreads();
     }
 
-    if (laneId == 0) {
-        img_out[warpId] = sum;
+    if (thread == 0) {
+        img_out[pixel] = colorSums[0];
     }
 }
 
 void PrefixSumBlending_GPU::run(DatasetGPU &data, float3 *d_img_out)
 {
-    uint32_t warpsBlock = BLOCK / WARP_SIZE;
-    uint32_t grid = (data._n_pixels + warpsBlock - 1) / warpsBlock;
+    uint32_t threads = BLOCK;
+    uint32_t blocks = data._n_pixels;
+    size_t shared_mem_size = (data._samples_per_pixel * sizeof(float)) + (threads * sizeof(float3));
 
-    prefixAndColorMultiThread<<<grid, BLOCK>>>(data._n_pixels, data._samples_per_pixel, data._alphas, data._colors, d_img_out);
+    prefixAndColorMultiThread<<<blocks, threads, shared_mem_size>>>(data._alphas, data._colors, d_img_out, data._n_pixels, data._samples_per_pixel);
 
     CUDA_SYNC_CHECK_THROW();
 }
