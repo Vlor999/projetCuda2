@@ -40,7 +40,7 @@ endif()
 # GPU Implementation
 add_library(prefixsum_gpu
 	include/prefixsum.h
-	src/prefixsum.cu
+	src/prefixsum2.cu
 )
 target_include_directories(prefixsum_gpu PRIVATE "${CMAKE_SOURCE_DIR}/include" "${CMAKE_SOURCE_DIR}/include/helper")
 set_target_properties(prefixsum_gpu PROPERTIES CUDA_ARCHITECTURES ${CC})
