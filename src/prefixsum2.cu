@@ -19,7 +19,6 @@ void PrefixSumBlending_GPU::setup(uint2 dimensions, uint32_t samples_per_pixel) 
 
 void PrefixSumBlending_GPU::finalize() 
 {
-
 }
 
 __global__ void prefixAndColorMultiThread(uint32_t n_pixels, uint32_t n_samples_per_pixel, const float *alpha, const float3 *colors, float3 *img_out) {
