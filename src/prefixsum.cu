@@ -56,10 +56,10 @@ __global__ void prefixSumWeightsIteration(const float* alpha_in, float* weights_
 
     __syncthreads();
 
-    for (uint32_t s = 1; s < n_samples_per_pixel; s *= 2) {
-        uint32_t i = (thread + 1) * s * 2 - 1;
-        if (i < n_samples_per_pixel) {
-            T[i] *= T[i - s];
+    for (uint32_t s = 1; s < n_samples_per_pixel; s <<= 1) {
+        uint32_t pos = (thread + 1) * s << 1 - 1;
+        if (pos < n_samples_per_pixel) {
+            T[pos] *= T[pos - s];
         }
         __syncthreads();
     }
@@ -69,8 +69,8 @@ __global__ void prefixSumWeightsIteration(const float* alpha_in, float* weights_
     }
     __syncthreads();
 
-    for (uint32_t s = n_samples_per_pixel / 2; s >= 1; s /= 2) {
-        uint32_t i = (thread + 1) * s * 2 - 1;
+    for (uint32_t s = n_samples_per_pixel >> 1; s >= 1; s >>= 1) {
+        uint32_t i = (thread + 1) * s << 1 - 1;
         if (i < n_samples_per_pixel) {
             float temp = T[i - s];
             T[i - s] = T[i];
@@ -107,7 +107,7 @@ __global__ void reduceColorIteration(const float *alpha_in, const float *weights
     sharedMem[thread] = sum;
     __syncthreads();
 
-    for (uint32_t s = numberthreads / 2; s > 0; s >>= 1) {
+    for (uint32_t s = numberthreads >> 1; s > 0; s >>= 1) {
         if (thread < s){
             sharedMem[thread] += sharedMem[thread + s];
         }
